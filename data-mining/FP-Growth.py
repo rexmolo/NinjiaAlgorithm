@@ -1,4 +1,3 @@
-
 """
 FP-Growth Algorithm Implementation for E-Commerce Order Analysis
 TechGear Online Store Example - Finding Frequent Product Combinations
@@ -337,7 +336,232 @@ def mine_single_path(root, prefix, min_support):
 
 
 # ============================================================================
-# 10. MAIN EXECUTION
+# 10. MINING PATTERNS: THE COMPLETE FP-GROWTH ALGORITHM
+# ============================================================================
+
+def get_conditional_pattern_base(root, item_name):
+    """
+    Get the conditional pattern base for an item.
+    This is the collection of prefix paths ending with this item.
+    
+    Args:
+        root: Root of the FP-Tree
+        item_name: Item to find patterns for
+    
+    Returns:
+        List of (prefix_path, count) tuples
+    """
+    # Find all nodes with this item
+    nodes = collect_all_nodes(root, item_name)
+    
+    # Collect all prefix paths
+    conditional_patterns = []
+    
+    for node in nodes:
+        # Get the path from root to this node (excluding the node itself)
+        path = []
+        count = node.count
+        current = node.parent
+        
+        while current.item_name != "Root":
+            path.append(current.item_name)
+            current = current.parent
+        
+        # Reverse to get root-to-node order
+        path.reverse()
+        
+        if path:  # Only add if there's a prefix path
+            conditional_patterns.append((path, count))
+    
+    return conditional_patterns
+
+
+def build_conditional_fp_tree(conditional_patterns, min_support):
+    """
+    Build a conditional FP-Tree from conditional pattern base
+    
+    Args:
+        conditional_patterns: List of (path, count) tuples
+        min_support: Minimum support threshold
+    
+    Returns:
+        Tuple of (root, frequent_items, item_order) or (None, None, None) if empty
+    """
+    # Count items in conditional patterns
+    item_counts = Counter()
+    for path, count in conditional_patterns:
+        for item in path:
+            item_counts[item] += count
+    
+    # Filter by min support
+    frequent_items = {item: cnt 
+                     for item, cnt in item_counts.items() 
+                     if cnt >= min_support}
+    
+    if not frequent_items:
+        return None, None, None
+    
+    # Get frequency order
+    item_order = get_sorted_frequent_items(frequent_items)
+    
+    # Build conditional tree
+    root = FPNode("Root", 0, None)
+    
+    for path, count in conditional_patterns:
+        # Filter and reorder
+        ordered = reorder_transaction(path, item_order)
+        if ordered:
+            insert_transaction(root, ordered, count)
+    
+    return root, frequent_items, item_order
+
+
+def mine_fp_tree(root, min_support, prefix=[], frequent_patterns=None):
+    """
+    Recursively mine frequent patterns from FP-Tree
+    
+    Args:
+        root: Root of the FP-Tree
+        min_support: Minimum support threshold
+        prefix: Current prefix pattern being built
+        frequent_patterns: Dictionary to store {pattern: support}
+    
+    Returns:
+        Dictionary of {pattern: support}
+    """
+    if frequent_patterns is None:
+        frequent_patterns = {}
+    
+    # Get all items in this tree (from leaf to root order - least frequent first)
+    items = {}
+    
+    def collect_items(node):
+        if node.item_name != "Root":
+            if node.item_name not in items:
+                items[node.item_name] = 0
+            items[node.item_name] += node.count
+        for child in node.children.values():
+            collect_items(child)
+    
+    collect_items(root)
+    
+    # Sort items by frequency (ascending - mine least frequent first)
+    sorted_items = sorted(items.items(), key=lambda x: x[1])
+    
+    # Mine each item
+    for item, support in sorted_items:
+        # Create new pattern by adding this item to prefix
+        new_pattern = prefix + [item]
+        
+        # Store this frequent pattern
+        pattern_key = tuple(sorted(new_pattern))
+        if pattern_key not in frequent_patterns or frequent_patterns[pattern_key] < support:
+            frequent_patterns[pattern_key] = support
+        
+        # Get conditional pattern base for this item
+        conditional_patterns = get_conditional_pattern_base(root, item)
+        
+        # Build conditional FP-Tree
+        cond_root, cond_items, cond_order = build_conditional_fp_tree(
+            conditional_patterns, min_support
+        )
+        
+        # If conditional tree is not empty, mine it recursively
+        if cond_root is not None:
+            mine_fp_tree(cond_root, min_support, new_pattern, frequent_patterns)
+    
+    return frequent_patterns
+
+
+def print_frequent_patterns(patterns, transactions):
+    """
+    Print frequent patterns in a nice format
+    
+    Args:
+        patterns: Dictionary of {pattern: support}
+        transactions: Original transactions for calculating percentage
+    """
+    print("\n" + "=" * 70)
+    print("ALL FREQUENT PATTERNS (Itemsets)")
+    print("=" * 70)
+    
+    # Group by size
+    by_size = {}
+    for pattern, support in patterns.items():
+        size = len(pattern)
+        if size not in by_size:
+            by_size[size] = []
+        by_size[size].append((pattern, support))
+    
+    # Print by size
+    total_count = len(transactions)
+    
+    for size in sorted(by_size.keys()):
+        print(f"\n{size}-itemsets:")
+        print("-" * 70)
+        
+        # Sort by support (descending)
+        by_size[size].sort(key=lambda x: (-x[1], x[0]))
+        
+        for pattern, support in by_size[size]:
+            percent = (support / total_count) * 100
+            items_str = ", ".join(pattern)
+            print(f"  {{{items_str}}}")
+            print(f"    Support: {support}/{total_count} transactions ({percent:.1f}%)")
+
+
+def demonstrate_mining_process(root, item_name, min_support):
+    """
+    Demonstrate the mining process step-by-step for one item
+    
+    Args:
+        root: Root of FP-Tree
+        item_name: Item to demonstrate mining for
+        min_support: Minimum support threshold
+    """
+    print("\n" + "=" * 70)
+    print(f"DETAILED MINING EXAMPLE: {item_name}")
+    print("=" * 70)
+    
+    # Step 1: Get conditional pattern base
+    print(f"\n[Step 1] Find all occurrences of '{item_name}' in the tree:")
+    nodes = collect_all_nodes(root, item_name)
+    print(f"  Found {len(nodes)} node(s)")
+    
+    print(f"\n[Step 2] Extract prefix paths (Conditional Pattern Base):")
+    conditional_patterns = get_conditional_pattern_base(root, item_name)
+    
+    total_support = 0
+    for path, count in conditional_patterns:
+        print(f"  {path} : {count}")
+        total_support += count
+    
+    print(f"\n  → Total support for '{item_name}': {total_support}")
+    
+    # Step 2: Build conditional FP-Tree
+    print(f"\n[Step 3] Build Conditional FP-Tree for '{item_name}':")
+    cond_root, cond_items, cond_order = build_conditional_fp_tree(
+        conditional_patterns, min_support
+    )
+    
+    if cond_root is None:
+        print(f"  → No frequent items co-occur with '{item_name}'")
+        print(f"  → This means '{item_name}' is often bought alone or with infrequent items")
+    else:
+        print(f"  → Frequent items that co-occur with '{item_name}': {cond_items}")
+        print(f"  → Conditional FP-Tree structure:")
+        print_tree(cond_root, "    ", True, cond_order)
+        
+        # Mine patterns
+        print(f"\n[Step 4] Mine patterns from conditional tree:")
+        patterns = mine_fp_tree(cond_root, min_support, [item_name], {})
+        
+        for pattern, support in sorted(patterns.items(), key=lambda x: -x[1]):
+            print(f"  {set(pattern)} : {support}")
+
+
+# ============================================================================
+# 11. MAIN EXECUTION
 # ============================================================================
 
 def main():
@@ -380,41 +604,64 @@ def main():
     print("=" * 70)
     print_tree(root, item_order=item_order)
     
-    # Analyze patterns for one item as example
+    # ========================================================================
+    # NOW THE REAL MAGIC: MINING PATTERNS FROM THE TREE
+    # ========================================================================
+    
+    # Demonstrate mining for Laptop_Bag step-by-step
+    demonstrate_mining_process(root, "Laptop_Bag", min_support)
+    
+    # Demonstrate mining for USB_Cable
+    demonstrate_mining_process(root, "USB_Cable", min_support)
+    
+    # Mine ALL frequent patterns
     print("\n" + "=" * 70)
-    print("PATTERN ANALYSIS EXAMPLE: USB_Cable")
+    print("MINING ALL FREQUENT PATTERNS")
+    print("=" * 70)
+    print("\nThis is where FP-Growth shows its power!")
+    print("We'll now extract ALL frequent itemsets in one pass...")
+    
+    all_patterns = mine_fp_tree(root, min_support)
+    
+    # Print all patterns
+    print_frequent_patterns(all_patterns, transactions)
+    
+    # Business insights
+    print("\n" + "=" * 70)
+    print("BUSINESS INSIGHTS & RECOMMENDATIONS")
     print("=" * 70)
     
-    # Find all nodes containing USB_Cable
-    usb_nodes = collect_all_nodes(root, "USB_Cable")
-    print(f"\nFound {len(usb_nodes)} node(s) containing 'USB_Cable' in the tree")
+    print("\n📦 PRODUCT BUNDLES TO CREATE:")
+    # Find 2-itemsets with high support
+    two_itemsets = [(p, s) for p, s in all_patterns.items() if len(p) == 2]
+    two_itemsets.sort(key=lambda x: -x[1])
     
-    # Extract prefix paths
-    print("\nPrefix paths (what items were purchased BEFORE USB_Cable):")
-    all_prefix_paths = []
-    for node in usb_nodes:
-        paths = find_prefix_paths(node)
-        all_prefix_paths.extend(paths)
-        for path, count in paths:
-            print(f"  {path} : {count} times")
+    for pattern, support in two_itemsets[:3]:
+        percent = (support / len(transactions)) * 100
+        print(f"  • Bundle: {' + '.join(pattern)}")
+        print(f"    Reason: Bought together in {support}/{len(transactions)} orders ({percent:.1f}%)")
     
-    if all_prefix_paths:
-        print("\n→ This tells us: USB_Cable is often bought with Mouse and Keyboard!")
-        print("→ Business insight: Bundle these items or recommend them together")
+    print("\n🎯 RECOMMENDATION ENGINE RULES:")
+    # Find 2-itemsets for recommendations
+    for pattern, support in two_itemsets[:3]:
+        items = list(pattern)
+        print(f"  • 'Customers who bought {items[0]} also bought {items[1]}'")
+    
+    print("\n📊 INVENTORY MANAGEMENT:")
+    print("  • High-demand items (stock up): Mouse, Laptop, Keyboard")
+    print("  • Bundle items (store nearby): Mouse + Keyboard, Laptop + Laptop_Bag")
+    print("  • Low-demand items (reduce stock): Screen_Protector")
     
     print("\n" + "=" * 70)
-    print("QUESTIONS TO EXPLORE:")
+    print("KEY TAKEAWAYS: WHY FP-GROWTH WINS")
     print("=" * 70)
-    print("1. Trace the path 'Mouse → Laptop → Laptop_Bag:4'")
-    print("   - Which transactions created this path?")
-    print("   - Why is the count 4?")
-    print("\n2. Why is there a separate 'Keyboard:1' branch from Root?")
-    print("   - Which transaction created it?")
-    print("   - Why doesn't it start with Mouse?")
-    print("\n3. Compare this to Apriori:")
-    print("   - How many database scans did FP-Growth use? (Answer: 2)")
-    print("   - Did we generate any candidate itemsets? (Answer: No!)")
-    print("   - All patterns are encoded in this compact tree structure!")
+    print("\n✅ Database Scans: Only 2 (vs Apriori's multiple scans)")
+    print("✅ Candidate Generation: ZERO (vs Apriori's exponential candidates)")
+    print("✅ Memory Efficiency: Tree compresses repeated patterns")
+    print("✅ Speed: Mines patterns directly from tree structure")
+    print("\nFor this small dataset, the difference isn't huge.")
+    print("But with 10,000+ products and 1M+ transactions?")
+    print("FP-Growth is 10-100x faster than Apriori! 🚀")
     print("=" * 70)
 
 
